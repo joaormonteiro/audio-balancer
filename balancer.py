@@ -166,7 +166,8 @@ def main():
             for key in [k for k in tracked if k not in seen]:
                 del tracked[key]
 
-        level = max((peak(s) for s in voice_sessions), default=0.0)
+        levels = [(peak(s), s) for s in voice_sessions]
+        level, top = max(levels, key=lambda x: x[0], default=(0.0, None))
         if "--debug" in sys.argv and int(now * 2) != int((now - poll) * 2):
             print(f"voz={level:.3f} limiar={threshold} falando={talking}")
         if level > threshold:
@@ -175,7 +176,8 @@ def main():
                 above_since = now
             if not talking and now - above_since >= min_speech:
                 talking = True
-                print("fala detectada: abaixando")
+                src = f"{proc_name(top)}@{top.device_name.split(' (')[0]} pid {top.ProcessId}"
+                print(f"fala detectada ({src}, nivel {level:.3f}): abaixando")
         else:
             above_since = None
             if talking and now - last_above > hold:
