@@ -78,6 +78,34 @@ def list_mode():
         time.sleep(0.5)
 
 
+def diagnose(seconds=30):
+    """Compara o nivel do Discord com o dos outros apps (acha vazamento)."""
+    cfg = json.loads(CONFIG.read_text(encoding="utf-8"))
+    voice_procs = {p.lower() for p in cfg["voice"]["processes"]}
+    print(f"Gravando {seconds}s. Silencio na call: toque musica ~10s, pause ~10s, repita.")
+    with_music, without_music = [], []
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        v, o = 0.0, 0.0
+        for s in get_all_sessions():
+            p = peak(s)
+            if proc_name(s) in voice_procs:
+                v = max(v, p)
+            elif proc_name(s) != "systemsounds":
+                o = max(o, p)
+        (with_music if o > 0.05 else without_music).append(v)
+        time.sleep(0.05)
+
+    def stats(xs):
+        if not xs:
+            return "sem amostras"
+        over = sum(1 for x in xs if x > cfg["voice"]["threshold"]) / len(xs)
+        return f"{len(xs)} amostras, media {sum(xs)/len(xs):.3f}, acima do limiar {over:.0%}"
+
+    print("Discord COM outro app tocando:", stats(with_music))
+    print("Discord SEM outro app tocando:", stats(without_music))
+
+
 class Tracked:
     """Estado de um app que pode ser abaixado."""
 
@@ -195,6 +223,8 @@ if __name__ == "__main__":
     try:
         if "--list" in sys.argv:
             list_mode()
+        elif "--diagnose" in sys.argv:
+            diagnose()
         else:
             main()
     except KeyboardInterrupt:
