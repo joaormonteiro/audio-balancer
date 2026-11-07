@@ -1,59 +1,73 @@
-# audio-balancer
+# Audio Balancer
 
-A small Windows background tool that automatically balances game and music volume against voice chat.
+**Automatic volume balance between your game, your music and your voice chat, for Windows.**
 
-When friends start talking on Discord, the music and the game get quieter so the conversation comes through. When the call goes quiet, everything fades back to your normal volume.
+You are in a Discord call with friends, playing a game, with music in the background. Everything lands in the same headphones. Audio Balancer listens to the call, and the moment someone starts talking it fades the music and the game down so the conversation comes through. When the call goes quiet, everything fades back to your normal volume.
+
+No more reaching for the Volume Mixer every time someone speaks.
+
+<p align="center">
+  <img src="docs/screenshot.png" alt="Audio Balancer window" width="320">
+</p>
+
+## Download and install
+
+1. Go to the [latest release](https://github.com/joaormonteiro/audio-balancer/releases/latest) and download **AudioBalancer.exe**.
+2. Double-click it. There is no installer: the app opens its window and puts an icon in the system tray (near the clock).
+3. That's it. Join a call and play something.
+
+> **Windows SmartScreen warning:** the app is not code-signed, so Windows may say "Windows protected your PC" the first time. Click **More info**, then **Run anyway**. The full source code is in this repository, and you can build the exe yourself (see below).
+
+## How to use
+
+- **Call app:** the app that carries your friends' voices. Discord is the default. You can pick another one from the list (TeamSpeak, Mumble, Zoom...) or type its process name.
+- **Music apps:** tick the apps that play your music (Spotify, a browser for YouTube...). Apps currently making sound show a note icon. Everything not ticked, such as your game, is treated as "games and other apps".
+- **Lower music by / Lower games by:** how much each group drops while someone is talking. The defaults are 75% for music and 40% for games.
+- **Voice sensitivity:** raise it if quiet voices are not detected, lower it if the volume dips when nobody is talking.
+- **Enabled:** pause and resume without closing the app. Pausing returns every volume to normal.
+- **Start with Windows / Start minimized:** run it quietly in the background at login.
+
+Closing the window sends the app to the tray and keeps it running. Use **Quit** in the tray menu to exit; your volumes are restored on exit.
+
+Settings are saved automatically in `%APPDATA%\audio-balancer\config.json`.
 
 ## How it works
 
 - **Per-app volume control:** uses the Windows Core Audio API (WASAPI) through [pycaw](https://github.com/AndreMiras/pycaw) to change the volume of individual apps, exactly like the Windows Volume Mixer.
-- **Multi-device:** scans every active output device (monitor, speakers, TV, Bluetooth), so the voice app and the music can play on different outputs.
-- **Speech detection:** reads the output peak meter of the voice app (Discord by default). Since Discord only plays other people's voices to your headphones, a level above the threshold means someone is talking.
-- **Ducking with smooth fades:** fast fade down when speech starts, slow fade up after a hold time of silence, so the volume does not flutter between sentences.
-- **Leak compensation:** on some setups the voice app's meter mirrors a fraction of what other apps play on the same output (measured around 20% of Spotify's level). The tool subtracts the expected leak and keeps relearning the ratio while nobody talks, so music is not mistaken for speech. `--diagnose` measures this.
-- **Short sounds are ignored:** a minimum speech duration filters out join/leave and notification sounds.
-- **Respects manual changes:** if you change an app's volume yourself while the tool is running, it learns the new base volume.
-- **Restores on exit:** volumes go back to normal when you stop the program.
+- **Speech detection:** reads the output level meter of the call app. The call app only plays other people's voices to your headphones, so a level above the threshold means someone is talking.
+- **Works across outputs:** scans every active output device (monitor, speakers, TV, Bluetooth), so the call and the music can play on different devices.
+- **Leak compensation:** on some setups the call app's meter mirrors a fraction of what other apps play on the same output, which would make the music look like speech. The app measures that ratio continuously and subtracts it, so music alone never triggers the ducking.
+- **Smooth fades:** a fast fade down when speech starts and a slow fade up after about a second of silence, so the volume does not flutter between sentences. Short sounds such as join and leave notifications are ignored.
+- **Respects manual changes:** if you change an app's volume yourself, the app learns the new base volume.
 
-## Setup
+## Limitations
+
+- Windows only (needs WASAPI).
+- Browsers expose one audio session for all tabs, so a YouTube tab is lowered together with every other tab that is playing sound.
+- Games with exclusive-mode audio can bypass the Windows mixer, in which case their volume cannot be lowered.
+
+## Run from source
 
 Requires Windows and Python 3.10+.
 
 ```bash
 python -m venv .venv
 .venv\Scripts\pip install -r requirements.txt
+
+# window + tray
+.venv\Scripts\python -m audio_balancer
+
+# console only, with live levels (useful for debugging)
+.venv\Scripts\python -m audio_balancer --debug
+
+# list the apps currently producing sound
+.venv\Scripts\python -m audio_balancer --list
 ```
 
-## Usage
+## Build the exe yourself
 
 ```bash
-# run the balancer
-.venv\Scripts\python balancer.py
-
-# list apps currently producing audio, with their live level
-.venv\Scripts\python balancer.py --list
+.venv\Scripts\python build.py
 ```
 
-## Configuration
-
-Everything lives in `config.json`:
-
-| Key | Meaning |
-| --- | --- |
-| `voice.processes` | Apps that carry the call audio (e.g. `discord.exe`). Never ducked. |
-| `voice.threshold` | Peak level (0 to 1) above which someone counts as speaking. |
-| `voice.leak_ratio` | Starting guess for how much of other apps' audio leaks into the voice app's meter. Relearned automatically. |
-| `voice.min_speech_ms` | Minimum sound duration to count as speech. |
-| `voice.hold_ms` | Silence required before volumes come back. |
-| `rules` | Groups of apps with their own duck amount (`0.75` = reduce by 75%). |
-| `default_duck` | Duck amount for any app audio session not matched by a rule (games, etc.). `null` leaves unmatched apps alone. |
-| `ignore` | Process names to never touch. |
-| `fade_down_ms` / `fade_up_ms` | Fade durations. |
-| `poll_ms` | How often the audio level is checked. |
-
-Adding a new app is just adding its process name to a rule, for example another browser or a different music player. Use `--list` to find the exact process name.
-
-## Limitations
-
-- Browsers expose one audio session for all tabs, so a YouTube tab is ducked together with every other tab playing sound.
-- If the voice app's output level is very low, lower `voice.threshold`.
+The result is `dist\AudioBalancer.exe` (one file, no console window).

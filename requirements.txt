@@ -1,2 +1,6 @@
 pycaw
 psutil
+customtkinter
+pystray
+pillow
+pyinstaller
