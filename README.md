@@ -10,6 +10,7 @@ When friends start talking on Discord, the music and the game get quieter so the
 - **Multi-device:** scans every active output device (monitor, speakers, TV, Bluetooth), so the voice app and the music can play on different outputs.
 - **Speech detection:** reads the output peak meter of the voice app (Discord by default). Since Discord only plays other people's voices to your headphones, a level above the threshold means someone is talking.
 - **Ducking with smooth fades:** fast fade down when speech starts, slow fade up after a hold time of silence, so the volume does not flutter between sentences.
+- **Leak compensation:** on some setups the voice app's meter mirrors a fraction of what other apps play on the same output (measured around 20% of Spotify's level). The tool subtracts the expected leak and keeps relearning the ratio while nobody talks, so music is not mistaken for speech. `--diagnose` measures this.
 - **Short sounds are ignored:** a minimum speech duration filters out join/leave and notification sounds.
 - **Respects manual changes:** if you change an app's volume yourself while the tool is running, it learns the new base volume.
 - **Restores on exit:** volumes go back to normal when you stop the program.
@@ -41,6 +42,7 @@ Everything lives in `config.json`:
 | --- | --- |
 | `voice.processes` | Apps that carry the call audio (e.g. `discord.exe`). Never ducked. |
 | `voice.threshold` | Peak level (0 to 1) above which someone counts as speaking. |
+| `voice.leak_ratio` | Starting guess for how much of other apps' audio leaks into the voice app's meter. Relearned automatically. |
 | `voice.min_speech_ms` | Minimum sound duration to count as speech. |
 | `voice.hold_ms` | Silence required before volumes come back. |
 | `rules` | Groups of apps with their own duck amount (`0.75` = reduce by 75%). |

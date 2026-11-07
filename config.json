@@ -2,6 +2,7 @@
   "voice": {
     "processes": ["discord.exe"],
     "threshold": 0.02,
+    "leak_ratio": 0.22,
     "min_speech_ms": 150,
     "hold_ms": 1200
   },

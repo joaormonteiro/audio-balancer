@@ -157,6 +157,8 @@ def main():
     down_step = poll / (cfg["fade_down_ms"] / 1000)
     up_step = poll / (cfg["fade_up_ms"] / 1000)
 
+    leak_ratio = cfg["voice"].get("leak_ratio", 0.22)
+    others = []
     tracked = {}
     atexit.register(lambda: [t.restore() for t in tracked.values()])
 
@@ -174,12 +176,15 @@ def main():
             sessions = get_all_sessions()
             seen = set()
             voice_sessions = []
+            others = []
             for s in sessions:
                 name = proc_name(s)
                 key = sid(s)
                 if name in voice_procs:
                     voice_sessions.append(s)
                     continue
+                if name != "systemsounds":
+                    others.append(s)
                 if name in ignore:
                     continue
                 duck = rule_map.get(name, default_duck)
@@ -194,10 +199,33 @@ def main():
             for key in [k for k in tracked if k not in seen]:
                 del tracked[key]
 
-        levels = [(peak(s), s) for s in voice_sessions]
+        # O Discord "vaza": a sessao dele mostra ~20% do que os outros apps
+        # tocam no mesmo dispositivo (ja com o volume de cada app aplicado).
+        # Entao voz = nivel do Discord menos o vazamento esperado.
+        mix = {}
+        for o in others:
+            try:
+                eff = peak(o) * o.SimpleAudioVolume.GetMasterVolume()
+            except Exception:
+                eff = 0.0
+            mix[o.device_name] = mix.get(o.device_name, 0.0) + eff
+
+        levels = []
+        raw_best = (0.0, 0.0)
+        for s in voice_sessions:
+            raw = peak(s)
+            m = mix.get(s.device_name, 0.0)
+            levels.append((max(0.0, raw - leak_ratio * m), s))
+            if m > 0.05 and raw / m > raw_best[0]:
+                raw_best = (raw / m, m)
         level, top = max(levels, key=lambda x: x[0], default=(0.0, None))
+
+        # Reaprende a proporcao do vazamento enquanto ninguem fala.
+        if not talking and level <= threshold and raw_best[1] > 0.05:
+            leak_ratio += 0.02 * (raw_best[0] - leak_ratio)
+
         if "--debug" in sys.argv and int(now * 2) != int((now - poll) * 2):
-            print(f"voz={level:.3f} limiar={threshold} falando={talking}")
+            print(f"voz={level:.3f} limiar={threshold} vazamento={leak_ratio:.2f} falando={talking}")
         if level > threshold:
             last_above = now
             if above_since is None:
