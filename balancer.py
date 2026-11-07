@@ -8,6 +8,7 @@ import atexit
 import json
 import sys
 import time
+from collections import deque
 from pathlib import Path
 
 from comtypes import CLSCTX_ALL
@@ -20,6 +21,9 @@ from pycaw.pycaw import (
 )
 
 CONFIG = Path(__file__).with_name("config.json")
+LEAK_WINDOW = 8.0     # segundos de historico pra estimar o vazamento
+LEAK_QUANTILE = 0.2   # usa o percentil baixo: voz so aumenta o nivel
+LEAK_MARGIN = 1.15    # folga sobre o vazamento estimado
 
 
 def get_all_sessions():
@@ -158,6 +162,7 @@ def main():
     up_step = poll / (cfg["fade_up_ms"] / 1000)
 
     leak_ratio = cfg["voice"].get("leak_ratio", 0.22)
+    ratios = deque()
     others = []
     tracked = {}
     atexit.register(lambda: [t.restore() for t in tracked.values()])
@@ -210,19 +215,29 @@ def main():
                 eff = 0.0
             mix[o.device_name] = mix.get(o.device_name, 0.0) + eff
 
+        # A proporcao do vazamento muda (musica, volume da TV...), entao e
+        # estimada o tempo todo: fala so SOMA nivel, logo os menores valores
+        # de raw/mix da janela mostram a proporcao real do vazamento.
+        for s in voice_sessions:
+            m = mix.get(s.device_name, 0.0)
+            r = peak(s)
+            if m > 0.05 and r > 0:
+                ratios.append((now, r / m))
+        while ratios and now - ratios[0][0] > LEAK_WINDOW:
+            ratios.popleft()
+        if len(ratios) >= 20:
+            vals = sorted(v for _, v in ratios)
+            leak_ratio = vals[int(len(vals) * LEAK_QUANTILE)]
+
         levels = []
-        raw_best = (0.0, 0.0)
         for s in voice_sessions:
             raw = peak(s)
             m = mix.get(s.device_name, 0.0)
-            levels.append((max(0.0, raw - leak_ratio * m), s))
-            if m > 0.05 and raw / m > raw_best[0]:
-                raw_best = (raw / m, m)
+            lvl = max(0.0, raw - LEAK_MARGIN * leak_ratio * m)
+            if m > 0.05 and len(ratios) < 20:
+                lvl = 0.0  # ainda aprendendo o vazamento: nao decide ainda
+            levels.append((lvl, s))
         level, top = max(levels, key=lambda x: x[0], default=(0.0, None))
-
-        # Reaprende a proporcao do vazamento enquanto ninguem fala.
-        if not talking and level <= threshold and raw_best[1] > 0.05:
-            leak_ratio += 0.02 * (raw_best[0] - leak_ratio)
 
         if "--debug" in sys.argv and int(now * 2) != int((now - poll) * 2):
             print(f"voz={level:.3f} limiar={threshold} vazamento={leak_ratio:.2f} falando={talking}")
