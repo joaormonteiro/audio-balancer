@@ -134,6 +134,8 @@ def main():
                 del tracked[key]
 
         level = max((peak(s) for s in voice_sessions), default=0.0)
+        if "--debug" in sys.argv and int(now * 2) != int((now - poll) * 2):
+            print(f"voz={level:.3f} limiar={threshold} falando={talking}")
         if level > threshold:
             last_above = now
             if above_since is None:
