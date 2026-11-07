@@ -1,6 +1,5 @@
 pycaw
 psutil
-customtkinter
-pystray
+PySide6-Essentials
 pillow
 pyinstaller

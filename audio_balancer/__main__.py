@@ -65,7 +65,7 @@ def cli(debug: bool):
 
 
 def gui(start_hidden: bool):
-    from .gui import App
+    from .gui import run
     from .i18n import t
 
     if not single_instance():
@@ -77,9 +77,8 @@ def gui(start_hidden: bool):
     cfg = cfgmod.load()
     engine = Engine(cfg)
     engine.start()
-    app = App(engine, cfg, start_hidden=start_hidden or cfg["start_minimized"])
     try:
-        app.mainloop()
+        run(engine, cfg, start_hidden=start_hidden or cfg["start_minimized"])
     finally:
         engine.stop()
 
