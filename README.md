@@ -7,6 +7,7 @@ When friends start talking on Discord, the music and the game get quieter so the
 ## How it works
 
 - **Per-app volume control:** uses the Windows Core Audio API (WASAPI) through [pycaw](https://github.com/AndreMiras/pycaw) to change the volume of individual apps, exactly like the Windows Volume Mixer.
+- **Multi-device:** scans every active output device (monitor, speakers, TV, Bluetooth), so the voice app and the music can play on different outputs.
 - **Speech detection:** reads the output peak meter of the voice app (Discord by default). Since Discord only plays other people's voices to your headphones, a level above the threshold means someone is talking.
 - **Ducking with smooth fades:** fast fade down when speech starts, slow fade up after a hold time of silence, so the volume does not flutter between sentences.
 - **Short sounds are ignored:** a minimum speech duration filters out join/leave and notification sounds.

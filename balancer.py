@@ -11,9 +11,39 @@ import time
 from pathlib import Path
 
 from comtypes import CLSCTX_ALL
-from pycaw.pycaw import AudioUtilities, IAudioMeterInformation
+from pycaw.constants import DEVICE_STATE, EDataFlow
+from pycaw.pycaw import (
+    AudioSession,
+    AudioUtilities,
+    IAudioMeterInformation,
+    IAudioSessionControl2,
+)
 
 CONFIG = Path(__file__).with_name("config.json")
+
+
+def get_all_sessions():
+    """Sessoes de audio de TODOS os dispositivos de saida ativos."""
+    sessions = []
+    devices = AudioUtilities.GetAllDevices(
+        EDataFlow.eRender.value, DEVICE_STATE.ACTIVE.value
+    )
+    for dev in devices:
+        try:
+            mgr = dev.AudioSessionManager
+            enum = mgr.GetSessionEnumerator()
+            for i in range(enum.GetCount()):
+                ctl = enum.GetSession(i)
+                if ctl is None:
+                    continue
+                ctl2 = ctl.QueryInterface(IAudioSessionControl2)
+                if ctl2 is not None:
+                    s = AudioSession(ctl2)
+                    s.device_name = dev.FriendlyName
+                    sessions.append(s)
+        except Exception:
+            continue
+    return sessions
 
 
 def proc_name(session):
@@ -40,8 +70,11 @@ def sid(session):
 
 def list_mode():
     for _ in range(10):
-        rows = [(proc_name(s), peak(s)) for s in AudioUtilities.GetAllSessions()]
-        print("  ".join(f"{n}={p:.3f}" for n, p in rows))
+        rows = [
+            (proc_name(s), s.device_name.split(" (")[0], peak(s))
+            for s in get_all_sessions()
+        ]
+        print("  ".join(f"{n}@{d}={p:.3f}" for n, d, p in rows))
         time.sleep(0.5)
 
 
@@ -110,7 +143,7 @@ def main():
 
         if now - last_refresh > 1.0:
             last_refresh = now
-            sessions = AudioUtilities.GetAllSessions()
+            sessions = get_all_sessions()
             seen = set()
             voice_sessions = []
             for s in sessions:
