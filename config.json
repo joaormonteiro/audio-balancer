@@ -1,0 +1,16 @@
+{
+  "voice": {
+    "processes": ["discord.exe"],
+    "threshold": 0.02,
+    "min_speech_ms": 150,
+    "hold_ms": 1200
+  },
+  "rules": [
+    { "name": "musica", "processes": ["spotify.exe", "chrome.exe", "msedge.exe", "firefox.exe", "brave.exe"], "duck": 0.75 }
+  ],
+  "default_duck": 0.4,
+  "ignore": ["audiodg.exe", "explorer.exe", "systemsounds"],
+  "fade_down_ms": 150,
+  "fade_up_ms": 800,
+  "poll_ms": 50
+}
