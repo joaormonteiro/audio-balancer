@@ -1,9 +1,14 @@
-"""Bridge between the audio engine / settings and the QML interface."""
+"""Bridge between the audio engine / settings and the QML interface.
+
+Created when the window opens and destroyed when it closes, so a tray-only
+session keeps no UI state or timers alive.
+"""
 from PySide6.QtCore import Property, QObject, QTimer, Signal, Slot
+from PySide6.QtGui import QFontDatabase
 
 from . import autostart
 from . import config as cfgmod
-from .i18n import STRINGS, LANG
+from .i18n import LANG, STRINGS
 
 KNOWN_CALL_APPS = [
     "discord.exe",
@@ -25,16 +30,17 @@ class Backend(QObject):
     playingChanged = Signal()
     voiceChanged = Signal()
     settingsChanged = Signal()
-    showRequested = Signal()
+    iconsChanged = Signal()
+    activeChanged = Signal()
     quitRequested = Signal()
+    closing = Signal()
+    raiseRequested = Signal()
 
-    def __init__(self, engine, cfg, assets_url, glass, start_hidden, max_height=760, parent=None):
+    def __init__(self, engine, cfg, assets_url, max_height=740, parent=None):
         super().__init__(parent)
         self._engine = engine
         self._cfg = cfg
         self._assets = assets_url
-        self._glass = glass
-        self._start_hidden = start_hidden
         self._max_height = float(max_height)
         self._kind = "idle"
         self._level = 0.0
@@ -42,11 +48,31 @@ class Backend(QObject):
         self._playing = []
         self._choices = list(KNOWN_CALL_APPS)
         self._autostart = autostart.is_enabled()
+        self._icon_version = 0
+        self._known_paths = len(self._cfg.get("app_paths", {}))
+        self._active = True
         self._tick_n = 0
         self._timer = QTimer(self)
         self._timer.setInterval(100)
         self._timer.timeout.connect(self._tick)
+        engine.want_apps = True
         self._timer.start()
+        self._tick()
+
+    def _save(self):
+        """Persist locally and hand the new settings to the tray process (it owns the engine)."""
+        cfgmod.save(self._cfg)
+        push = getattr(self._engine, "push_cfg", None)
+        if push:
+            try:
+                push(self._cfg)
+            except (OSError, EOFError):
+                pass
+
+    def shutdown(self):
+        """Called when the window closes: stop polling and let the engine idle."""
+        self._timer.stop()
+        self._engine.want_apps = False
 
     # ---------- constants for QML ----------
     @Property("QVariantMap", constant=True)
@@ -57,17 +83,17 @@ class Backend(QObject):
     def assets(self):
         return self._assets
 
-    @Property(bool, constant=True)
-    def glass(self):
-        return self._glass
+    @Property(str, constant=True)
+    def iconFont(self):
+        families = set(QFontDatabase.families())
+        for name in ("Segoe Fluent Icons", "Segoe MDL2 Assets"):
+            if name in families:
+                return name
+        return "Segoe UI Symbol"
 
     @Property(float, constant=True)
     def maxHeight(self):
         return self._max_height
-
-    @Property(bool, constant=True)
-    def startHidden(self):
-        return self._start_hidden
 
     # ---------- live state ----------
     @Property(str, notify=statusChanged)
@@ -82,6 +108,10 @@ class Backend(QObject):
     def musicApps(self):
         return self._apps
 
+    @Property(int, notify=appsChanged)
+    def musicCount(self):
+        return sum(1 for a in self._apps if a["selected"])
+
     @Property("QVariantList", notify=playingChanged)
     def playing(self):
         return self._playing
@@ -90,6 +120,29 @@ class Backend(QObject):
     def voiceChoices(self):
         return self._choices
 
+    @Property(int, notify=iconsChanged)
+    def iconVersion(self):
+        return self._icon_version
+
+    def _get_active(self):
+        return self._active
+
+    def _set_active(self, v):
+        v = bool(v)
+        if v == self._active:
+            return
+        self._active = v
+        # A minimized window needs no refreshes at all.
+        if v:
+            self._engine.want_apps = True
+            self._timer.start()
+        else:
+            self._timer.stop()
+            self._engine.want_apps = False
+        self.activeChanged.emit()
+
+    active = Property(bool, _get_active, _set_active, notify=activeChanged)
+
     # ---------- settings ----------
     def _get_enabled(self):
         return self._engine.enabled
@@ -97,7 +150,7 @@ class Backend(QObject):
     def _set_enabled(self, v):
         self._engine.enabled = bool(v)
         self._cfg["enabled"] = bool(v)
-        cfgmod.save(self._cfg)
+        self._save()
         self.enabledChanged.emit()
         self._tick()
 
@@ -115,7 +168,7 @@ class Backend(QObject):
         if name == self._cfg["voice_app"]:
             return
         self._cfg["voice_app"] = name
-        cfgmod.save(self._cfg)
+        self._save()
         self.voiceChanged.emit()
         self._rebuild_apps()
 
@@ -127,7 +180,7 @@ class Backend(QObject):
 
         def set_(self, v):
             self._cfg[key] = float(v) / scale
-            cfgmod.save(self._cfg)
+            self._save()
             self.settingsChanged.emit()
 
         return Property(float, get, set_, notify=sig)
@@ -146,7 +199,7 @@ class Backend(QObject):
             pass
         self._autostart = autostart.is_enabled()
         self._cfg["autostart"] = self._autostart
-        cfgmod.save(self._cfg)
+        self._save()
         self.settingsChanged.emit()
 
     autostart = Property(bool, _get_autostart, _set_autostart, notify=settingsChanged)
@@ -156,26 +209,40 @@ class Backend(QObject):
 
     def _set_min(self, v):
         self._cfg["start_minimized"] = bool(v)
-        cfgmod.save(self._cfg)
+        self._save()
         self.settingsChanged.emit()
 
     startMinimized = Property(bool, _get_min, _set_min, notify=settingsChanged)
 
     # ---------- slots ----------
-    @Slot(str, bool)
-    def setMusicApp(self, name, on):
+    @Slot(str)
+    def toggleMusic(self, name):
         apps = [a.lower() for a in self._cfg["music_apps"]]
-        if on and name not in apps:
-            apps.append(name)
-        if not on:
+        if name in apps:
             apps = [a for a in apps if a != name]
+        else:
+            apps.append(name)
         self._cfg["music_apps"] = apps
-        cfgmod.save(self._cfg)
+        self._save()
         self._rebuild_apps()
 
     @Slot()
     def quit(self):
+        req = getattr(self._engine, "request_quit", None)
+        if req:
+            try:
+                req()
+            except (OSError, EOFError):
+                pass
         self.quitRequested.emit()
+
+    @Slot()
+    def windowClosing(self):
+        self.closing.emit()
+
+    # ---------- helpers used by the icon provider ----------
+    def icon_path(self, name):
+        return self._engine.exe_paths.get(name) or self._cfg.get("app_paths", {}).get(name, "")
 
     # ---------- internals ----------
     def _rebuild_apps(self):
@@ -196,9 +263,33 @@ class Backend(QObject):
         if choices != self._choices:
             self._choices = choices
             self.voiceChanged.emit()
+        # Remember exe paths so icons still show for apps that are not running.
+        paths = self._cfg.setdefault("app_paths", {})
+        added = False
+        for name, path in self._engine.exe_paths.items():
+            if paths.get(name) != path:
+                paths[name] = path
+                added = True
+        if added:
+            self._save()
+        if len(paths) != self._known_paths or added:
+            self._known_paths = len(paths)
+            self._icon_version += 1
+            self.iconsChanged.emit()
 
     def _tick(self):
         e = self._engine
+        refresh = getattr(e, "refresh", None)
+        if refresh:
+            try:
+                refresh()
+            except (OSError, EOFError):  # tray process went away
+                self._timer.stop()
+                self.quitRequested.emit()
+                return
+            if getattr(e, "raise_requested", False):
+                e.raise_requested = False
+                self.raiseRequested.emit()
         if not e.enabled:
             kind, level = "off", 0.0
         elif e.talking:
@@ -208,7 +299,7 @@ class Backend(QObject):
         if kind != self._kind:
             self._kind = kind
             self.statusChanged.emit()
-        if abs(level - self._level) > 0.005:
+        if abs(level - self._level) > 0.01:
             self._level = level
             self.levelChanged.emit()
         self._tick_n += 1
@@ -218,7 +309,3 @@ class Backend(QObject):
             if playing != self._playing:
                 self._playing = playing
                 self.playingChanged.emit()
-
-    @property
-    def kind_value(self):
-        return self._kind

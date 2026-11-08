@@ -11,7 +11,7 @@ import sys
 import time
 
 from . import config as cfgmod
-from .engine import Engine, get_all_sessions, peak, proc_name
+from .engine import Engine, snapshot
 
 
 def single_instance() -> bool:
@@ -25,11 +25,8 @@ def single_instance() -> bool:
 
 def list_mode():
     for _ in range(10):
-        rows = [
-            (proc_name(s), s.device_name.split(" (")[0], peak(s))
-            for s in get_all_sessions()
-        ]
-        print("  ".join(f"{n}@{d}={p:.3f}" for n, d, p in rows))
+        rows = snapshot()
+        print("  ".join(f"{n}@{d[-8:]}={p:.3f}" for n, d, p in rows))
         time.sleep(0.5)
 
 
@@ -39,10 +36,8 @@ def selftest(path: str):
 
     out = {"ok": False, "apps": [], "error": None}
     try:
-        for s in get_all_sessions():
-            out["apps"].append(
-                {"name": proc_name(s), "device": s.device_name, "peak": round(peak(s), 3)}
-            )
+        for name, device, level in snapshot():
+            out["apps"].append({"name": name, "device": device[-12:], "peak": round(level, 3)})
         out["ok"] = True
     except Exception as exc:  # report instead of crashing
         out["error"] = repr(exc)
@@ -83,11 +78,26 @@ def gui(start_hidden: bool):
         engine.stop()
 
 
+def lower_priority():
+    """Stay out of the game's way: run below normal priority."""
+    try:
+        import psutil
+
+        psutil.Process().nice(psutil.BELOW_NORMAL_PRIORITY_CLASS)
+    except Exception:
+        pass
+
+
 def main():
     args = sys.argv[1:]
+    lower_priority()
     if "--selftest" in args:
         i = args.index("--selftest")
         selftest(args[i + 1] if i + 1 < len(args) else "selftest.json")
+    elif "--ui" in args:
+        from .gui import run_window
+
+        sys.exit(run_window())
     elif "--list" in args:
         list_mode()
     elif "--cli" in args or "--debug" in args:

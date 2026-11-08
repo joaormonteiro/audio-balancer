@@ -25,9 +25,9 @@ No more reaching for the Volume Mixer every time someone speaks.
 
 ## How to use
 
-- **Call app:** the app that carries your friends' voices. Discord is the default. You can pick another one from the list (TeamSpeak, Mumble, Zoom...) or type its process name.
-- **Music apps:** tick the apps that play your music (Spotify, a browser for YouTube...). Apps currently making sound show a note icon. Everything not ticked, such as your game, is treated as "games and other apps".
-- **Lower music by / Lower games by:** how much each group drops while someone is talking. The defaults are 75% for music and 40% for games.
+- **Call app (tile top left):** the app that carries your friends' voices. Discord is the default. You can pick another one from the list (TeamSpeak, Mumble, Zoom...) or type its process name.
+- **Music apps (tile top right):** tick the apps that play your music (Spotify, a browser for YouTube...). Apps currently making sound get a yellow dot. Everything not ticked, such as your game, is treated as "games and other apps".
+- **Lower music / Lower games:** how much each group drops while someone is talking. The defaults are 75% for music and 40% for games.
 - **Voice sensitivity:** raise it if quiet voices are not detected, lower it if the volume dips when nobody is talking.
 - **Enabled:** pause and resume without closing the app. Pausing returns every volume to normal.
 - **Start with Windows / Start minimized:** run it quietly in the background at login.
@@ -45,9 +45,15 @@ Settings are saved automatically in `%APPDATA%\audio-balancer\config.json`.
 - **Smooth fades:** a fast fade down when speech starts and a slow fade up after about a second of silence, so the volume does not flutter between sentences. Short sounds such as join and leave notifications are ignored.
 - **Respects manual changes:** if you change an app's volume yourself, the app learns the new base volume.
 
-## Look and feel
+## Look and feel and performance
 
-The interface is a translucent "liquid glass" window. On Windows 11 (22H2 or newer) it uses the real acrylic blur behind the window. On older versions it falls back to a solid dark background with the same layout.
+The interface is inspired by the HarmonyOS home screen: a vivid blue wallpaper, frosted rounded tiles, squircle app icons (the real icons of your apps) and a dock of toggles.
+
+It is built to stay out of your game's way:
+
+- **Tray only:** about 60 MB of RAM and roughly 0.1% of one CPU core. No UI code is running at all.
+- **Window open:** the window is a separate process that exists only while it is open, so closing it gives all of its memory back (it uses around 200 MB while open).
+- **Engine:** runs at below-normal priority, polls every 250 ms when nothing is happening and only goes to 50 ms while someone is actually speaking. Windows audio objects are cached, so steady state makes no audio API calls.
 
 ## Limitations
 

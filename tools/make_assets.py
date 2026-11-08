@@ -107,19 +107,55 @@ def render_icon(c1, c2, glow):
     return out.resize((1024, 1024), Image.LANCZOS)
 
 
-def make_backdrop():
-    w, h = 900, 1200
-    layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    d = ImageDraw.Draw(layer)
-    blobs = [
-        ((-120, -80, 520, 560), (122, 92, 255, 150)),
-        ((420, 380, 1050, 1000), (25, 211, 197, 120)),
-        ((-160, 760, 420, 1320), (255, 107, 214, 80)),
-        ((380, -60, 980, 420), (47, 123, 255, 95)),
-    ]
-    for box, color in blobs:
-        d.ellipse(box, fill=color)
-    return layer.filter(ImageFilter.GaussianBlur(110))
+def make_wallpaper(w=840, h=1500):
+    """Vivid blue wallpaper with glossy flowing ribbons (HarmonyOS-like)."""
+    import math
+
+    top, mid, bot = (6, 44, 205), (16, 104, 255), (70, 196, 255)
+    col = Image.new("RGB", (1, h))
+    for y in range(h):
+        t = y / (h - 1)
+        c = lerp(top, mid, t / 0.55) if t < 0.55 else lerp(mid, bot, (t - 0.55) / 0.45)
+        col.putpixel((0, y), c)
+    img = col.resize((w, h)).convert("RGBA")
+
+    def blob(box, color, alpha, blur):
+        nonlocal img
+        layer = Image.new("RGBA", (w, h), color + (0,))  # same color when transparent: no dark fringes
+        ImageDraw.Draw(layer).ellipse(box, fill=color + (alpha,))
+        img = Image.alpha_composite(img, layer.filter(ImageFilter.GaussianBlur(blur)))
+
+    def ribbon(center, a1, f1, p1, a2, f2, p2, thick, tamp, fill, body, hi):
+        nonlocal img
+        xs = list(range(-80, w + 81, 5))
+        up, down = [], []
+        for x in xs:
+            cy = center + a1 * math.sin(f1 * x + p1) + a2 * math.sin(f2 * x + p2)
+            tk = thick + tamp * math.sin(0.0046 * x + p1 * 1.7)
+            up.append((x, cy - tk / 2))
+            down.append((x, cy + tk / 2))
+        mask = Image.new("L", (w, h), 0)
+        ImageDraw.Draw(mask).polygon(up + down[::-1], fill=255)
+        mask = mask.filter(ImageFilter.GaussianBlur(7))
+        grad = Image.linear_gradient("L").resize((w, h)).point(lambda v: int(body * (1 - v / 255) + 25))
+        band = Image.new("RGBA", (w, h), fill + (0,))
+        band.putalpha(ImageChops.multiply(mask, grad))
+        img = Image.alpha_composite(img, band)
+        for line, alpha, width, blur in ((up, hi, 5, 3.0), (up, min(255, hi + 60), 2, 0.8)):
+            edge = Image.new("RGBA", (w, h), (255, 255, 255, 0))
+            ImageDraw.Draw(edge).line(line, fill=(255, 255, 255, alpha), width=width, joint="curve")
+            img = Image.alpha_composite(img, edge.filter(ImageFilter.GaussianBlur(blur)))
+        shade = Image.new("RGBA", (w, h), (0, 24, 150, 0))
+        ImageDraw.Draw(shade).line(down, fill=(0, 24, 150, 90), width=14)
+        img = Image.alpha_composite(img, shade.filter(ImageFilter.GaussianBlur(10)))
+
+    blob((-300, -240, 560, 520), (140, 215, 255), 120, 150)
+    ribbon(h * 0.27, 120, 0.0068, 0.5, 40, 0.0155, 1.2, 150, 70, (175, 232, 255), 190, 70)
+    ribbon(h * 0.50, 150, 0.0058, 2.3, 50, 0.0130, 0.4, 200, 90, (110, 196, 255), 170, 60)
+    ribbon(h * 0.76, 110, 0.0082, 4.1, 35, 0.0170, 2.6, 165, 60, (205, 242, 255), 200, 75)
+    blob((380, 1000, 1150, 1760), (0, 28, 150), 130, 150)
+    blob((-200, 1180, 520, 1700), (120, 230, 255), 90, 130)
+    return img.convert("RGB")
 
 
 def main():
@@ -133,7 +169,7 @@ def main():
     )
     idle.resize((64, 64), Image.LANCZOS).save(OUT / "tray_idle.png")
     talk.resize((64, 64), Image.LANCZOS).save(OUT / "tray_talk.png")
-    make_backdrop().save(OUT / "backdrop.png")
+    make_wallpaper().save(OUT / "wallpaper.jpg", quality=90)
     print("assets written to", OUT)
 
 

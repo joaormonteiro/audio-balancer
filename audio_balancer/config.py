@@ -22,6 +22,7 @@ DEFAULTS = {
     "fade_up_ms": 800,
     "poll_ms": 50,
     "ignore": ["audiodg.exe", "explorer.exe"],
+    "app_paths": {},       # process name -> exe path, remembered for icons
     "enabled": True,
     "autostart": False,
     "start_minimized": False,

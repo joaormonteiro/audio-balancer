@@ -1,18 +1,26 @@
-"""Liquid-glass window (Qt Quick) plus system tray icon."""
+"""System tray + on-demand window.
+
+While the app sits in the tray nothing from Qt Quick is loaded or running: the
+window (and its QML engine, GPU resources and timers) is created when opened
+and torn down when closed, so the tray session stays as light as possible.
+"""
 import ctypes
+import gc
+import os
+import subprocess
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QUrl
+from PySide6.QtCore import QObject, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QAction, QIcon, QPixmap
-from PySide6.QtQml import QQmlApplicationEngine
-from PySide6.QtQuick import QQuickWindow
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
+from . import config as cfgmod
+from . import ipc
 from .i18n import t
-from .ui_backend import Backend
 
 APP_ID = "joaormonteiro.AudioBalancer"
+CAPTION_COLOR = 0x00D03008  # COLORREF 0x00BBGGRR: deep blue matching the wallpaper
 
 
 def resource_dir() -> Path:
@@ -21,27 +29,113 @@ def resource_dir() -> Path:
     return Path(base) / "audio_balancer" if base else Path(__file__).parent
 
 
-def glass_supported() -> bool:
-    """Acrylic backdrop needs Windows 11 22H2 (build 22621) or newer."""
-    try:
-        return sys.getwindowsversion().build >= 22621
-    except Exception:
-        return False
-
-
-def apply_glass(window) -> None:
-    """Dark title bar, acrylic blur behind the whole window."""
+def apply_caption(window) -> None:
+    """Blue title bar with white text so the frame blends into the wallpaper."""
     try:
         hwnd = int(window.winId())
         dwm = ctypes.windll.dwmapi
-        one, three, round_ = ctypes.c_int(1), ctypes.c_int(3), ctypes.c_int(2)
-        dwm.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(one), 4)     # dark mode
-        dwm.DwmSetWindowAttribute(hwnd, 33, ctypes.byref(round_), 4)  # rounded corners
-        dwm.DwmSetWindowAttribute(hwnd, 38, ctypes.byref(three), 4)   # acrylic backdrop
-        margins = (ctypes.c_int * 4)(-1, -1, -1, -1)
-        dwm.DwmExtendFrameIntoClientArea(hwnd, ctypes.byref(margins))
+        for attr, value in ((35, CAPTION_COLOR), (34, CAPTION_COLOR), (36, 0x00FFFFFF)):
+            v = ctypes.c_int(value)
+            dwm.DwmSetWindowAttribute(hwnd, attr, ctypes.byref(v), 4)
     except Exception:
         pass
+
+
+def trim_memory() -> None:
+    """Hand freed pages back to Windows so the tray session shows a small footprint."""
+    gc.collect()
+    try:
+        ctypes.windll.psapi.EmptyWorkingSet(ctypes.windll.kernel32.GetCurrentProcess())
+    except Exception:
+        pass
+
+
+class StateBridge(QObject):
+    """Lets the engine thread tell the main thread that speech started/stopped."""
+
+    changed = Signal(bool)
+    quit_requested = Signal()
+    enabled_changed = Signal(bool)
+
+
+class Shell:
+    def __init__(self, app, engine, cfg):
+        self.app, self.engine, self.cfg = app, engine, cfg
+        self.res = resource_dir()
+        self.assets = self.res / "assets"
+        self.proc = None
+        self.bridge = StateBridge()  # IPC threads reach the Qt thread through signals
+        self.server = ipc.Server(
+            engine, cfg, lambda: cfgmod.save(cfg),
+            on_quit=self.bridge.quit_requested.emit,
+            on_enabled=self.bridge.enabled_changed.emit,
+        )
+        self.bridge.quit_requested.connect(self.quit)
+        self.bridge.enabled_changed.connect(self._sync_enabled)
+
+        self.app_icon = QIcon(QPixmap(str(self.assets / "icon.png")))
+        self.idle_icon = QIcon(QPixmap(str(self.assets / "tray_idle.png")))
+        self.talk_icon = QIcon(QPixmap(str(self.assets / "tray_talk.png")))
+        app.setWindowIcon(self.app_icon)
+
+        self.tray = QSystemTrayIcon(self.idle_icon, app)
+        self.tray.setToolTip(t("title"))
+        self.menu = QMenu()
+        open_act = QAction(t("tray_open"), self.menu)
+        open_act.triggered.connect(self.show_window)
+        self.enabled_act = QAction(t("tray_enabled"), self.menu, checkable=True)
+        self.enabled_act.setChecked(engine.enabled)
+        self.enabled_act.triggered.connect(self.set_enabled)
+        quit_act = QAction(t("tray_quit"), self.menu)
+        quit_act.triggered.connect(self.quit)
+        self.menu.addActions([open_act, self.enabled_act])
+        self.menu.addSeparator()
+        self.menu.addAction(quit_act)
+        self.tray.setContextMenu(self.menu)
+        self.tray.activated.connect(self._tray_clicked)
+        self.tray.show()
+
+        self.bridge.changed.connect(self.on_talking)
+        engine.on_state = self.bridge.changed.emit
+
+    # ---------- tray ----------
+    def _tray_clicked(self, reason):
+        if reason in (QSystemTrayIcon.Trigger, QSystemTrayIcon.DoubleClick):
+            self.show_window()
+
+    @Slot(bool)
+    def on_talking(self, talking):
+        self.tray.setIcon(self.talk_icon if talking else self.idle_icon)
+
+    def set_enabled(self, on):
+        self.engine.enabled = bool(on)
+        self.cfg["enabled"] = bool(on)
+        cfgmod.save(self.cfg)
+        self.enabled_act.setChecked(bool(on))
+        if not on:
+            self.tray.setIcon(self.idle_icon)
+
+    # ---------- window process ----------
+    def show_window(self):
+        """The window is its own process: closing it returns all of its memory."""
+        if self.proc is not None and self.proc.poll() is None:
+            self.server.raise_flag = True  # already open: ask it to come to the front
+            return
+        env = dict(os.environ, **self.server.env())
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        self.proc = subprocess.Popen(ipc.ui_command(), env=env, creationflags=flags)
+
+    def _sync_enabled(self, on):
+        self.enabled_act.setChecked(bool(on))
+        if not on:
+            self.tray.setIcon(self.idle_icon)
+
+    def quit(self):
+        self.tray.hide()
+        if self.proc is not None and self.proc.poll() is None:
+            self.proc.terminate()
+        self.engine.stop()
+        self.app.quit()
 
 
 def run(engine, cfg, start_hidden=False, on_ready=None) -> int:
@@ -50,73 +144,61 @@ def run(engine, cfg, start_hidden=False, on_ready=None) -> int:
     except Exception:
         pass
 
-    glass = glass_supported()
-    if glass:
-        QQuickWindow.setDefaultAlphaBuffer(True)
-
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     app.setApplicationName(t("title"))
+    shell = Shell(app, engine, cfg)
+    if not start_hidden:
+        shell.show_window()
+    else:
+        QTimer.singleShot(500, trim_memory)
+    if on_ready:  # test hook: lets scripts inspect the app before the loop starts
+        on_ready(app, shell)
+    return app.exec()
 
+
+def run_window() -> int:
+    """Window process: shows the UI and talks to the tray process over IPC."""
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
+    except Exception:
+        pass
+    from PySide6.QtQml import QQmlApplicationEngine
+
+    from . import config as cfgmod
+    from .icons import AppIconProvider
+    from .ui_backend import Backend
+
+    remote = ipc.RemoteEngine.from_env()
+    cfg = cfgmod.load()
+    app = QApplication(sys.argv)
+    app.setApplicationName(t("title"))
     res = resource_dir()
     assets = res / "assets"
-    app_icon = QIcon(QPixmap(str(assets / "icon.png")))
-    app.setWindowIcon(app_icon)
+    app.setWindowIcon(QIcon(QPixmap(str(assets / "icon.png"))))
 
-    # usable screen height minus the title bar and a little breathing room
     max_height = app.primaryScreen().availableGeometry().height() - 48
-    backend = Backend(
-        engine, cfg, QUrl.fromLocalFile(str(assets) + "/").toString(), glass,
-        start_hidden, max_height,
-    )
+    backend = Backend(remote, cfg, QUrl.fromLocalFile(str(assets) + "/").toString(), max_height)
     qml = QQmlApplicationEngine()
+    qml.addImageProvider("appicon", AppIconProvider(backend.icon_path))
     qml.rootContext().setContextProperty("backend", backend)
     qml.load(QUrl.fromLocalFile(str(res / "qml" / "main.qml")))
     if not qml.rootObjects():
         return 1
     window = qml.rootObjects()[0]
-    if glass:
-        apply_glass(window)
+    apply_caption(window)
+    backend.closing.connect(lambda: (backend.shutdown(), app.quit()))
+    backend.quitRequested.connect(app.quit)
 
-    # ---- tray ----
-    tray = QSystemTrayIcon(app_icon, app)
-    tray.setToolTip(t("title"))
-    menu = QMenu()
-    open_act = QAction(t("tray_open"), menu)
-    open_act.triggered.connect(backend.showRequested.emit)
-    enabled_act = QAction(t("tray_enabled"), menu, checkable=True)
-    enabled_act.setChecked(engine.enabled)
-    enabled_act.triggered.connect(lambda checked: setattr(backend, "enabled", checked))
-    quit_act = QAction(t("tray_quit"), menu)
-    quit_act.triggered.connect(backend.quitRequested.emit)
-    menu.addActions([open_act, enabled_act])
-    menu.addSeparator()
-    menu.addAction(quit_act)
-    tray.setContextMenu(menu)
-    tray.activated.connect(
-        lambda reason: backend.showRequested.emit()
-        if reason in (QSystemTrayIcon.Trigger, QSystemTrayIcon.DoubleClick)
-        else None
-    )
-    tray.show()
+    def bring_front():
+        window.show()
+        window.raise_()
+        window.requestActivate()
 
-    idle_icon = QIcon(QPixmap(str(assets / "tray_idle.png")))
-    talk_icon = QIcon(QPixmap(str(assets / "tray_talk.png")))
-
-    def sync_tray():
-        enabled_act.setChecked(engine.enabled)
-        tray.setIcon(talk_icon if backend.kind == "talking" else idle_icon)
-
-    backend.statusChanged.connect(sync_tray)
-    backend.enabledChanged.connect(sync_tray)
-    sync_tray()
-
-    def quit_app():
-        tray.hide()
-        engine.stop()
-        app.quit()
-
-    backend.quitRequested.connect(quit_app)
-    if on_ready:  # test hook: lets scripts inspect the window before the loop starts
-        on_ready(app, window, quit_app)
-    return app.exec()
+    backend.raiseRequested.connect(bring_front)
+    code = app.exec()
+    try:
+        remote.want_apps = False
+    except Exception:
+        pass
+    return code
