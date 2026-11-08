@@ -1,29 +1,35 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
-import QtQuick.Shapes
 import QtQuick.Window
 
-// Home-screen style UI: vivid wallpaper, frosted tiles, squircle icons, a dock.
-// Kept deliberately light: no shader effects, no continuous animations, and
-// updates only when a value actually changes (the backend ticks at 10 Hz).
+// Windows 11 (Fluent) look: Mica-like background, cards with a hairline border,
+// 8 px corners, accent-colored controls, light/dark following the system.
+// Light on resources: no shader effects, the meter timer only runs while visible.
 ApplicationWindow {
     id: win
     visible: true
-    width: 420
-    minimumWidth: 420
-    maximumWidth: 420
-    height: Math.min(700, backend.maxHeight)
+    width: 440
+    minimumWidth: 400
+    height: Math.min(780, backend.maxHeight)
     minimumHeight: 420
-    color: "#0b48e0"
     title: backend.tr.title
     font.family: "Segoe UI Variable Text, Segoe UI"
+    font.pixelSize: 14
 
+    readonly property bool dark: Qt.styleHints.colorScheme === Qt.Dark
+    readonly property color bg: dark ? "#202020" : "#f3f3f3"
+    readonly property color card: dark ? "#2b2b2b" : "#fbfbfb"
+    readonly property color stroke: dark ? "#383838" : "#e5e5e5"
+    readonly property color ink: dark ? "#ffffff" : "#1b1b1b"
+    readonly property color inkDim: dark ? "#c5c5c5" : "#5d5d5d"
+    readonly property color hover: dark ? "#333333" : "#f0f0f0"
+    readonly property color accent: dark ? "#60cdff" : "#0067c0"
+    readonly property color talk: "#f7a928"
     readonly property string iconFont: backend.iconFont
-    readonly property color accent: backend.kind === "talking" ? "#ffc44d"
-                                  : backend.kind === "off" ? "#c4d2ee" : "#7dffd9"
-    readonly property color ink: "#ffffff"
-    readonly property color inkDim: Qt.rgba(1, 1, 1, 0.78)
+
+    color: bg
+    SystemPalette { id: sysPal }
 
     onClosing: (close) => { close.accepted = true; backend.windowClosing() }
     onVisibilityChanged: backend.active = visible && visibility !== Window.Minimized
@@ -34,375 +40,340 @@ ApplicationWindow {
     }
 
     // ---------------------------------------------------------------- pieces
-    component Tile: Rectangle {
-        radius: 28
-        color: Qt.rgba(1, 1, 1, 0.20)
+    component Card: Rectangle {
+        radius: 8
+        color: win.card
         border.width: 1
-        border.color: Qt.rgba(1, 1, 1, 0.40)
-        Rectangle {          // light falling from the top, like frosted glass
-            anchors.fill: parent
-            anchors.margins: 1
-            radius: parent.radius - 1
-            gradient: Gradient {
-                GradientStop { position: 0.0; color: Qt.rgba(1, 1, 1, 0.20) }
-                GradientStop { position: 1.0; color: Qt.rgba(1, 1, 1, 0.02) }
+        border.color: win.stroke
+    }
+
+    component Caption: Text {
+        color: win.inkDim
+        font.pixelSize: 12
+        font.weight: Font.DemiBold
+    }
+
+    component FluentSwitch: Switch {
+        id: sw
+        implicitWidth: 44; implicitHeight: 22
+        padding: 0
+        indicator: Rectangle {
+            width: 40; height: 20; radius: 10
+            anchors.verticalCenter: parent.verticalCenter
+            color: sw.checked ? win.accent : "transparent"
+            border.width: 1
+            border.color: sw.checked ? win.accent : win.inkDim
+            Rectangle {
+                width: sw.pressed ? 17 : 12; height: 12; radius: 6
+                anchors.verticalCenter: parent.verticalCenter
+                x: sw.checked ? parent.width - width - 4 : 4
+                color: sw.checked ? (win.dark ? "#1b1b1b" : "white") : win.inkDim
+                Behavior on x { NumberAnimation { duration: 110 } }
             }
         }
     }
 
-    component Squircle: Rectangle {
-        id: sq
-        property string glyph: ""
-        property color c1: "#ffffff"
-        property color c2: "#cccccc"
-        property real glyphScale: 0.50
-        width: 40; height: 40
-        radius: width * 0.30
-        gradient: Gradient {
-            GradientStop { position: 0.0; color: sq.c1 }
-            GradientStop { position: 1.0; color: sq.c2 }
-        }
-        border.width: 1
-        border.color: Qt.rgba(1, 1, 1, 0.45)
-        Text {
-            anchors.centerIn: parent
-            text: sq.glyph
-            font.family: win.iconFont
-            font.pixelSize: sq.width * sq.glyphScale
-            color: "white"
-        }
-    }
-
-    component ThinSlider: Slider {
+    component FluentSlider: Slider {
         id: sl
-        implicitHeight: 24
+        implicitHeight: 28
         background: Item {
             x: sl.leftPadding
-            y: sl.topPadding + sl.availableHeight / 2 - 3
-            width: sl.availableWidth
-            height: 6
-            Rectangle { anchors.fill: parent; radius: 3; color: Qt.rgba(1, 1, 1, 0.30) }
-            Rectangle { width: sl.visualPosition * parent.width; height: parent.height; radius: 3; color: "white" }
+            y: sl.topPadding + sl.availableHeight / 2 - 2
+            width: sl.availableWidth; height: 4
+            Rectangle { anchors.fill: parent; radius: 2; color: win.dark ? "#9a9a9a" : "#8a8a8a"; opacity: 0.6 }
+            Rectangle { width: sl.visualPosition * parent.width; height: parent.height; radius: 2; color: win.accent }
         }
         handle: Rectangle {
             x: sl.leftPadding + sl.visualPosition * (sl.availableWidth - width)
             y: sl.topPadding + sl.availableHeight / 2 - height / 2
             width: 20; height: 20; radius: 10
-            color: "white"
-            border.width: 1; border.color: Qt.rgba(0.05, 0.25, 0.8, 0.25)
-            scale: sl.pressed ? 1.12 : 1.0
-            Behavior on scale { NumberAnimation { duration: 100 } }
+            color: win.dark ? "#454545" : "#ffffff"
+            border.width: 1; border.color: win.dark ? "#5a5a5a" : "#d0d0d0"
+            Rectangle {
+                anchors.centerIn: parent
+                width: sl.pressed ? 8 : 12; height: width; radius: width / 2
+                color: win.accent
+                Behavior on width { NumberAnimation { duration: 90 } }
+            }
         }
     }
 
-    component ControlTile: Tile {
-        id: ct
-        property string glyph
-        property color c1
-        property color c2
+    component SliderRow: Item {
+        id: sr
         property string title
         property string valueText
         property real from: 0
         property real to: 100
         property real value: 0
-        property bool wide: false
         signal moved(real v)
-
-        Squircle {
-            id: ico
-            x: 14; y: 14
-            width: 36; height: 36
-            glyph: ct.glyph; c1: ct.c1; c2: ct.c2
-        }
-        Text {
-            anchors { left: ico.right; leftMargin: 10; verticalCenter: ico.verticalCenter }
-            text: ct.title
-            color: win.ink; font.pixelSize: 13; font.weight: Font.Medium
-        }
-        Text {
-            anchors { right: parent.right; rightMargin: 18; top: parent.top; topMargin: ct.wide ? 14 : 52 }
-            visible: ct.wide
-            text: ct.valueText
-            color: win.ink; font.pixelSize: 26; font.weight: Font.Light
-        }
-        Text {
-            visible: !ct.wide
-            x: 18; y: 46
-            text: ct.valueText
-            color: win.ink; font.pixelSize: 32; font.weight: Font.Light
-        }
-        ThinSlider {
-            anchors { left: parent.left; right: parent.right; bottom: parent.bottom
-                      leftMargin: 18; rightMargin: 18; bottomMargin: 10 }
-            from: ct.from; to: ct.to; value: ct.value
-            onMoved: ct.moved(value)
+        Layout.fillWidth: true
+        implicitHeight: 56
+        Text { x: 0; y: 0; text: sr.title; color: win.ink }
+        Text { anchors.right: parent.right; y: 0; text: sr.valueText; color: win.inkDim }
+        FluentSlider {
+            anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+            from: sr.from; to: sr.to; value: sr.value
+            onMoved: sr.moved(value)
         }
     }
 
-    component DockItem: Item {
-        id: di
-        property string glyph
-        property string label
-        property bool on: false
-        property color c1: "#4be3b0"
-        property color c2: "#16a77d"
-        signal clicked()
-        width: 78; height: 84
-        scale: ma.pressed ? 0.93 : 1.0
-        Behavior on scale { NumberAnimation { duration: 90 } }
-        Column {
-            anchors.horizontalCenter: parent.horizontalCenter
-            spacing: 6
-            Squircle {
-                anchors.horizontalCenter: parent.horizontalCenter
-                width: 54; height: 54
-                glyph: di.glyph
-                c1: di.on ? di.c1 : Qt.rgba(1, 1, 1, 0.34)
-                c2: di.on ? di.c2 : Qt.rgba(1, 1, 1, 0.16)
-            }
-            Text {
-                anchors.horizontalCenter: parent.horizontalCenter
-                text: di.label
-                color: win.ink; font.pixelSize: 11
-            }
+    component ToggleRow: Item {
+        id: tr
+        property string title
+        property bool checked
+        signal toggled(bool v)
+        Layout.fillWidth: true
+        implicitHeight: 40
+        Text { anchors.verticalCenter: parent.verticalCenter; text: tr.title; color: win.ink }
+        FluentSwitch {
+            anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+            checked: tr.checked
+            onToggled: tr.toggled(checked)
         }
-        MouseArea { id: ma; anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: di.clicked() }
     }
 
-    // ---------------------------------------------------------------- scene
-    Image {
-        anchors.fill: parent
-        source: backend.assets + "wallpaper.jpg"
-        fillMode: Image.PreserveAspectCrop
-        sourceSize: Qt.size(840, 1500)
-        smooth: true
-        cache: false
-    }
+    component Divider: Rectangle { Layout.fillWidth: true; height: 1; color: win.stroke }
 
+    // ---------------------------------------------------------------- content
     Flickable {
         id: scroller
         anchors.fill: parent
         contentWidth: width
-        contentHeight: col.height + 22
+        contentHeight: col.height + 32
         boundsBehavior: Flickable.StopAtBounds
         clip: true
         interactive: contentHeight > height
+        ScrollBar.vertical: ScrollBar { }
 
-        Column {
+        ColumnLayout {
             id: col
-            x: 20; y: 6
-            width: 380
+            x: 16; y: 16
+            width: scroller.width - 32
             spacing: 12
 
-            // ---- hero (where the phone shows the clock)
-            Item {
-                width: parent.width; height: 112
+            // ---- status + sound bars
+            Card {
+                Layout.fillWidth: true
+                implicitHeight: 128
                 Column {
-                    anchors { left: parent.left; verticalCenter: parent.verticalCenter }
-                    spacing: 0
+                    x: 20; y: 16
+                    spacing: 2
                     Text {
                         text: backend.kind === "off" ? backend.tr.status_off
                             : backend.kind === "talking" ? backend.tr.hero_talking
                             : backend.tr.hero_idle
-                        color: win.ink
-                        font.pixelSize: 54; font.weight: Font.Light
+                        color: backend.kind === "talking" ? win.talk : win.ink
+                        font.pixelSize: 28; font.weight: Font.DemiBold
+                    }
+                    Text {
+                        text: win.appLabel(backend.voiceApp) + "  •  "
+                              + backend.musicCount + " " + backend.tr.hero_apps
+                        color: win.inkDim; font.pixelSize: 13
+                    }
+                }
+                // sound bars: scrolling history of the call's level
+                Item {
+                    id: meter
+                    anchors { left: parent.left; right: parent.right; bottom: parent.bottom
+                              leftMargin: 20; rightMargin: 20; bottomMargin: 14 }
+                    height: 40
+                    readonly property int n: 40
+                    property var hist: []
+                    Timer {
+                        interval: 70; repeat: true
+                        running: win.visible && backend.active
+                        onTriggered: {
+                            var h = meter.hist.slice(-(meter.n - 1))
+                            h.push(backend.kind === "off" ? 0 : backend.level)
+                            meter.hist = h
+                        }
                     }
                     Row {
-                        spacing: 8
-                        Rectangle {
-                            width: 10; height: 10; radius: 5; color: win.accent
-                            anchors.verticalCenter: parent.verticalCenter
-                        }
-                        Text {
-                            text: win.appLabel(backend.voiceApp) + "   •   "
-                                  + backend.musicCount + " " + backend.tr.hero_apps
-                            color: win.inkDim; font.pixelSize: 15
-                        }
-                    }
-                }
-            }
-
-            // ---- row 1: call ring + music folder
-            Row {
-                spacing: 14
-                Tile {
-                    id: callTile
-                    width: 183; height: 183
-                    Item {
-                        id: ring
-                        property real value: backend.level
-                        Behavior on value { NumberAnimation { duration: 120 } }
-                        anchors { horizontalCenter: parent.horizontalCenter; top: parent.top; topMargin: 16 }
-                        width: 120; height: 120
-                        Shape {
-                            anchors.fill: parent
-                            preferredRendererType: Shape.CurveRenderer
-                            ShapePath {
-                                strokeColor: Qt.rgba(1, 1, 1, 0.30); strokeWidth: 8
-                                fillColor: "transparent"
-                                PathAngleArc { centerX: 60; centerY: 60; radiusX: 54; radiusY: 54; startAngle: -90; sweepAngle: 359.9 }
-                            }
-                            ShapePath {
-                                strokeColor: win.accent; strokeWidth: 8
-                                fillColor: "transparent"; capStyle: ShapePath.RoundCap
-                                PathAngleArc {
-                                    centerX: 60; centerY: 60; radiusX: 54; radiusY: 54; startAngle: -90
-                                    sweepAngle: Math.max(0.1, 359.9 * Math.min(1, ring.value * 1.4))
-                                }
-                            }
-                        }
-                        Image {
-                            anchors.centerIn: parent
-                            width: 58; height: 58
-                            sourceSize: Qt.size(116, 116)
-                            smooth: true
-                            source: "image://appicon/" + backend.voiceApp + "?v=" + backend.iconVersion
-                        }
-                    }
-                    Text {
-                        anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom; bottomMargin: 12 }
-                        text: backend.tr.call_tile + "  ›"
-                        color: win.ink; font.pixelSize: 12; font.weight: Font.Medium
-                    }
-                    MouseArea {
                         anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: picker.open()
-                    }
-                }
-
-                Tile {
-                    id: folder
-                    width: 183; height: 183
-                    Flickable {
-                        x: 14; y: 14
-                        width: 155; height: 142
-                        contentHeight: grid.height
-                        clip: true
-                        boundsBehavior: Flickable.StopAtBounds
-                        interactive: contentHeight > height
-                        Grid {
-                            id: grid
-                            columns: 3
-                            spacing: 10
-                            Repeater {
-                                model: backend.musicApps
-                                delegate: Item {
-                                    width: 41; height: 41
-                                    scale: iconMa.pressed ? 0.9 : 1.0
-                                    Behavior on scale { NumberAnimation { duration: 90 } }
-                                    Image {
-                                        anchors.fill: parent
-                                        anchors.margins: 1
-                                        sourceSize: Qt.size(82, 82)
-                                        smooth: true
-                                        source: "image://appicon/" + modelData.name + "?v=" + backend.iconVersion
-                                        opacity: modelData.selected ? 1.0 : 0.38
-                                    }
-                                    Rectangle {      // check badge on the apps marked as music
-                                        visible: modelData.selected
-                                        width: 16; height: 16; radius: 8
-                                        anchors { right: parent.right; bottom: parent.bottom; rightMargin: -2; bottomMargin: -2 }
-                                        color: "#22c98f"
-                                        border.width: 1.5; border.color: "white"
-                                        Text { anchors.centerIn: parent; text: "✓"; color: "white"; font.pixelSize: 10; font.bold: true }
-                                    }
-                                    Rectangle {      // marker: this app is making sound right now
-                                        visible: backend.playing.indexOf(modelData.name) >= 0
-                                        width: 8; height: 8; radius: 4; color: "#ffd24d"
-                                        anchors { right: parent.right; top: parent.top }
-                                    }
-                                    MouseArea {
-                                        id: iconMa
-                                        anchors.fill: parent
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: backend.toggleMusic(modelData.name)
-                                    }
+                        spacing: 3
+                        Repeater {
+                            model: meter.n
+                            delegate: Item {
+                                width: (meter.width - 3 * (meter.n - 1)) / meter.n
+                                height: meter.height
+                                readonly property real v: {
+                                    var i = index - (meter.n - meter.hist.length)
+                                    return i >= 0 ? meter.hist[i] : 0
+                                }
+                                Rectangle {
+                                    width: parent.width
+                                    height: Math.max(3, parent.v * parent.height)
+                                    anchors.bottom: parent.bottom
+                                    radius: width / 2
+                                    color: backend.kind === "talking" ? win.talk : win.accent
+                                    opacity: parent.v > 0.02 ? 1.0 : 0.35
                                 }
                             }
                         }
-                        Text {
-                            anchors.centerIn: parent
-                            visible: backend.musicApps.length === 0
-                            width: parent.width
-                            horizontalAlignment: Text.AlignHCenter
-                            wrapMode: Text.WordWrap
-                            text: backend.tr.no_apps
-                            color: win.inkDim; font.pixelSize: 12
+                    }
+                }
+            }
+
+            // ---- call app
+            Caption { text: backend.tr.call_tile; Layout.leftMargin: 4; Layout.topMargin: 4 }
+            Card {
+                Layout.fillWidth: true
+                implicitHeight: 60
+                Image {
+                    id: callIcon
+                    x: 14; anchors.verticalCenter: parent.verticalCenter
+                    width: 32; height: 32
+                    sourceSize: Qt.size(64, 64); smooth: true
+                    source: "image://appicon/" + backend.voiceApp + "?v=" + backend.iconVersion
+                }
+                Text {
+                    anchors { left: callIcon.right; leftMargin: 12; verticalCenter: parent.verticalCenter }
+                    text: win.appLabel(backend.voiceApp)
+                    color: win.ink; font.weight: Font.Medium
+                }
+                Button {
+                    id: changeBtn
+                    anchors { right: parent.right; rightMargin: 14; verticalCenter: parent.verticalCenter }
+                    text: backend.tr.pick_change
+                    padding: 8; leftPadding: 16; rightPadding: 16
+                    contentItem: Text { text: changeBtn.text; color: win.ink; horizontalAlignment: Text.AlignHCenter }
+                    background: Rectangle {
+                        radius: 4
+                        color: changeBtn.down ? win.stroke : changeBtn.hovered ? win.hover : "transparent"
+                        border.width: 1; border.color: win.stroke
+                    }
+                    onClicked: picker.open()
+                }
+            }
+
+            // ---- music apps
+            Caption { text: backend.tr.music_apps; Layout.leftMargin: 4; Layout.topMargin: 4 }
+            Card {
+                Layout.fillWidth: true
+                implicitHeight: appsCol.height + 8
+                Column {
+                    id: appsCol
+                    y: 4
+                    width: parent.width
+                    Text {
+                        visible: backend.musicApps.length === 0
+                        width: parent.width; padding: 16
+                        wrapMode: Text.WordWrap
+                        text: backend.tr.no_apps
+                        color: win.inkDim
+                    }
+                    Repeater {
+                        model: backend.musicApps
+                        delegate: Rectangle {
+                            width: appsCol.width; height: 44
+                            color: rowMa.containsMouse ? win.hover : "transparent"
+                            readonly property bool isPlaying: backend.playing.indexOf(modelData.name) >= 0
+                            Image {
+                                id: rowIcon
+                                x: 14; anchors.verticalCenter: parent.verticalCenter
+                                width: 28; height: 28
+                                sourceSize: Qt.size(56, 56); smooth: true
+                                source: "image://appicon/" + modelData.name + "?v=" + backend.iconVersion
+                            }
+                            Column {
+                                anchors { left: rowIcon.right; leftMargin: 12; verticalCenter: parent.verticalCenter }
+                                Text { text: win.appLabel(modelData.name); color: win.ink }
+                                Text {
+                                    visible: isPlaying
+                                    text: backend.tr.playing
+                                    color: win.accent; font.pixelSize: 11
+                                }
+                            }
+                            FluentSwitch {
+                                anchors { right: parent.right; rightMargin: 14; verticalCenter: parent.verticalCenter }
+                                checked: modelData.selected
+                                onToggled: backend.toggleMusic(modelData.name)
+                            }
+                            MouseArea {
+                                id: rowMa
+                                anchors { left: parent.left; right: parent.right; top: parent.top; bottom: parent.bottom; rightMargin: 64 }
+                                hoverEnabled: true
+                                onClicked: backend.toggleMusic(modelData.name)
+                            }
                         }
                     }
-                    Text {
-                        anchors { horizontalCenter: parent.horizontalCenter; bottom: parent.bottom; bottomMargin: 12 }
-                        text: backend.tr.music_apps
-                        color: win.ink; font.pixelSize: 12; font.weight: Font.Medium
+                }
+            }
+
+            // ---- how much to lower
+            Caption { text: backend.tr.section_levels; Layout.leftMargin: 4; Layout.topMargin: 4 }
+            Card {
+                Layout.fillWidth: true
+                implicitHeight: lv.implicitHeight + 28
+                ColumnLayout {
+                    id: lv
+                    x: 16; y: 14
+                    width: parent.width - 32
+                    spacing: 8
+                    SliderRow {
+                        title: backend.tr.duck_music
+                        valueText: Math.round(backend.duckMusic) + "%"
+                        value: backend.duckMusic
+                        onMoved: (v) => backend.duckMusic = v
+                    }
+                    SliderRow {
+                        title: backend.tr.duck_other
+                        valueText: Math.round(backend.duckOther) + "%"
+                        value: backend.duckOther
+                        onMoved: (v) => backend.duckOther = v
+                    }
+                    SliderRow {
+                        title: backend.tr.sensitivity
+                        valueText: backend.sensitivity.toFixed(1)
+                        from: 1; to: 10
+                        value: backend.sensitivity
+                        onMoved: (v) => backend.sensitivity = v
                     }
                 }
             }
 
-            // ---- row 2: music / games ducking
-            Row {
-                spacing: 14
-                ControlTile {
-                    width: 183; height: 124
-                    glyph: ""; c1: "#ffb457"; c2: "#ff7a2f"
-                    title: backend.tr.tile_music
-                    valueText: Math.round(backend.duckMusic) + "%"
-                    value: backend.duckMusic
-                    onMoved: (v) => backend.duckMusic = v
-                }
-                ControlTile {
-                    width: 183; height: 124
-                    glyph: ""; c1: "#c58bff"; c2: "#7a4dff"
-                    title: backend.tr.tile_games
-                    valueText: Math.round(backend.duckOther) + "%"
-                    value: backend.duckOther
-                    onMoved: (v) => backend.duckOther = v
+            // ---- general
+            Caption { text: backend.tr.section_general; Layout.leftMargin: 4; Layout.topMargin: 4 }
+            Card {
+                Layout.fillWidth: true
+                implicitHeight: gen.implicitHeight + 16
+                ColumnLayout {
+                    id: gen
+                    x: 16; y: 8
+                    width: parent.width - 32
+                    spacing: 0
+                    ToggleRow {
+                        title: backend.tr.dock_power
+                        checked: backend.enabled
+                        onToggled: (v) => backend.enabled = v
+                    }
+                    Divider { }
+                    ToggleRow {
+                        title: backend.tr.autostart
+                        checked: backend.autostart
+                        onToggled: (v) => backend.autostart = v
+                    }
+                    Divider { }
+                    ToggleRow {
+                        title: backend.tr.minimized
+                        checked: backend.startMinimized
+                        onToggled: (v) => backend.startMinimized = v
+                    }
                 }
             }
 
-            // ---- row 3: sensitivity
-            ControlTile {
-                width: 380; height: 92
-                wide: true
-                glyph: ""; c1: "#5fe0e6"; c2: "#1c9bd8"
-                title: backend.tr.sensitivity
-                valueText: backend.sensitivity.toFixed(1)
-                from: 1; to: 10
-                value: backend.sensitivity
-                onMoved: (v) => backend.sensitivity = v
-            }
-
-            // ---- dock
-            Tile {
-                width: 380; height: 108
-                radius: 38
-                Row {
-                    anchors.centerIn: parent
-                    spacing: 6
-                    DockItem {
-                        glyph: ""; label: backend.tr.dock_power
-                        on: backend.enabled
-                        onClicked: backend.enabled = !backend.enabled
-                    }
-                    DockItem {
-                        glyph: ""; label: backend.tr.dock_start
-                        on: backend.autostart
-                        c1: "#6aa6ff"; c2: "#2a62e8"
-                        onClicked: backend.autostart = !backend.autostart
-                    }
-                    DockItem {
-                        glyph: ""; label: backend.tr.dock_min
-                        on: backend.startMinimized
-                        c1: "#ffb457"; c2: "#ff7a2f"
-                        onClicked: backend.startMinimized = !backend.startMinimized
-                    }
-                    DockItem {
-                        glyph: ""; label: backend.tr.dock_quit
-                        on: true
-                        c1: "#ff7a7a"; c2: "#e0364f"
-                        onClicked: backend.quit()
-                    }
+            Button {
+                id: quitBtn
+                Layout.alignment: Qt.AlignRight
+                text: backend.tr.dock_quit
+                padding: 8; leftPadding: 22; rightPadding: 22
+                contentItem: Text { text: quitBtn.text; color: win.ink; horizontalAlignment: Text.AlignHCenter }
+                background: Rectangle {
+                    radius: 4
+                    color: quitBtn.down ? win.stroke : quitBtn.hovered ? win.hover : win.card
+                    border.width: 1; border.color: win.stroke
                 }
+                onClicked: backend.quit()
             }
         }
     }
@@ -413,55 +384,53 @@ ApplicationWindow {
         modal: true
         dim: true
         anchors.centerIn: Overlay.overlay
-        width: 340
-        height: Math.min(440, win.height - 40)
+        width: Math.min(380, win.width - 32)
+        height: Math.min(460, win.height - 40)
         padding: 0
-        Overlay.modal: Rectangle { color: Qt.rgba(0, 0.05, 0.3, 0.45) }
+        Overlay.modal: Rectangle { color: Qt.rgba(0, 0, 0, 0.35) }
         background: Rectangle {
-            radius: 30
-            color: Qt.rgba(0.07, 0.26, 0.82, 0.96)
-            border.width: 1; border.color: Qt.rgba(1, 1, 1, 0.4)
+            radius: 8
+            color: win.card
+            border.width: 1; border.color: win.stroke
         }
         contentItem: ColumnLayout {
             spacing: 6
             Text {
-                Layout.topMargin: 18; Layout.leftMargin: 22
+                Layout.topMargin: 16; Layout.leftMargin: 18
                 text: backend.tr.pick_title
-                color: win.ink; font.pixelSize: 17; font.weight: Font.Medium
+                color: win.ink; font.pixelSize: 16; font.weight: Font.DemiBold
             }
             ListView {
                 Layout.fillWidth: true; Layout.fillHeight: true
-                Layout.leftMargin: 12; Layout.rightMargin: 12
+                Layout.leftMargin: 8; Layout.rightMargin: 8
                 clip: true
                 model: backend.voiceChoices
                 boundsBehavior: Flickable.StopAtBounds
                 delegate: Rectangle {
-                    width: ListView.view.width; height: 48; radius: 16
-                    color: modelData === backend.voiceApp ? Qt.rgba(1, 1, 1, 0.22)
-                         : rowMa.containsMouse ? Qt.rgba(1, 1, 1, 0.12) : "transparent"
+                    width: ListView.view.width; height: 44; radius: 6
+                    color: rowMa2.containsMouse ? win.hover : "transparent"
+                    Rectangle {      // Fluent selection pill
+                        visible: modelData === backend.voiceApp
+                        width: 3; height: 18; radius: 1.5; color: win.accent
+                        anchors { left: parent.left; verticalCenter: parent.verticalCenter }
+                    }
                     Row {
-                        anchors { verticalCenter: parent.verticalCenter; left: parent.left; leftMargin: 10 }
+                        anchors { verticalCenter: parent.verticalCenter; left: parent.left; leftMargin: 14 }
                         spacing: 12
                         Image {
-                            width: 32; height: 32
-                            sourceSize: Qt.size(64, 64); smooth: true
+                            width: 26; height: 26
+                            sourceSize: Qt.size(52, 52); smooth: true
                             source: "image://appicon/" + modelData + "?v=" + backend.iconVersion
                         }
                         Text {
                             anchors.verticalCenter: parent.verticalCenter
-                            text: modelData
-                            color: win.ink; font.pixelSize: 14
+                            text: win.appLabel(modelData)
+                            color: win.ink
                         }
                     }
-                    Text {
-                        visible: modelData === backend.voiceApp
-                        anchors { right: parent.right; rightMargin: 16; verticalCenter: parent.verticalCenter }
-                        text: "✓"; color: "white"; font.pixelSize: 16; font.bold: true
-                    }
                     MouseArea {
-                        id: rowMa
+                        id: rowMa2
                         anchors.fill: parent; hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
                         onClicked: { backend.voiceApp = modelData; picker.close() }
                     }
                 }
@@ -469,13 +438,15 @@ ApplicationWindow {
             TextField {
                 id: custom
                 Layout.fillWidth: true
-                Layout.leftMargin: 18; Layout.rightMargin: 18; Layout.bottomMargin: 18
+                Layout.leftMargin: 16; Layout.rightMargin: 16; Layout.bottomMargin: 16
                 placeholderText: backend.tr.pick_custom
-                placeholderTextColor: Qt.rgba(1, 1, 1, 0.55)
-                color: "white"
-                font.pixelSize: 14
-                leftPadding: 14
-                background: Rectangle { radius: 16; color: Qt.rgba(1, 1, 1, 0.16); border.width: 1; border.color: Qt.rgba(1, 1, 1, 0.35) }
+                placeholderTextColor: win.inkDim
+                color: win.ink
+                leftPadding: 12
+                background: Rectangle {
+                    radius: 4; color: win.bg
+                    border.width: 1; border.color: custom.activeFocus ? win.accent : win.stroke
+                }
                 onAccepted: { backend.voiceApp = text; text = ""; picker.close() }
             }
         }

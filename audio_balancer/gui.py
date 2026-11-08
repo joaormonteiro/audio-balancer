@@ -20,7 +20,6 @@ from . import ipc
 from .i18n import t
 
 APP_ID = "joaormonteiro.AudioBalancer"
-CAPTION_COLOR = 0x00D03008  # COLORREF 0x00BBGGRR: deep blue matching the wallpaper
 
 
 def resource_dir() -> Path:
@@ -30,13 +29,17 @@ def resource_dir() -> Path:
 
 
 def apply_caption(window) -> None:
-    """Blue title bar with white text so the frame blends into the wallpaper."""
+    """Match the title bar to the system light/dark theme (Windows 11 look)."""
     try:
+        from PySide6.QtCore import Qt
+        from PySide6.QtGui import QGuiApplication
+
+        dark = QGuiApplication.styleHints().colorScheme() == Qt.ColorScheme.Dark
         hwnd = int(window.winId())
-        dwm = ctypes.windll.dwmapi
-        for attr, value in ((35, CAPTION_COLOR), (34, CAPTION_COLOR), (36, 0x00FFFFFF)):
-            v = ctypes.c_int(value)
-            dwm.DwmSetWindowAttribute(hwnd, attr, ctypes.byref(v), 4)
+        v = ctypes.c_int(1 if dark else 0)
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(v), 4)  # immersive dark mode
+        m = ctypes.c_int(2)  # Mica backdrop on the title bar where supported
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 38, ctypes.byref(m), 4)
     except Exception:
         pass
 
